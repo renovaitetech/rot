@@ -9,7 +9,9 @@ import uvicorn
 import logging
 import asyncio
 import redis.asyncio as aioredis
+from collections import defaultdict
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from config import settings
@@ -20,26 +22,39 @@ logger = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient = None
 redis_client: aioredis.Redis = None
-system_prompt: str = ""
 
 SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
+
+WEEKDAYS_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+MONTHS_RU = ["", "января", "февраля", "марта", "апреля", "мая", "июня",
+             "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+
+
+def get_system_prompt() -> str:
+    """Read system_prompt.txt and substitute runtime variables."""
+    try:
+        template = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+    now = datetime.now()
+    variables = defaultdict(str, {
+        "date": f"{now.day} {MONTHS_RU[now.month]} {now.year}",
+        "time": now.strftime("%H:%M"),
+        "weekday": WEEKDAYS_RU[now.weekday()],
+    })
+    return template.format_map(variables)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_client, redis_client, system_prompt
+    global http_client, redis_client
 
     http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0),
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
     )
     redis_client = aioredis.from_url(settings.redis_url)
-
-    if SYSTEM_PROMPT_PATH.exists():
-        system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
-        logger.info(f"System prompt loaded ({len(system_prompt)} chars)")
-    else:
-        logger.warning(f"system_prompt.txt not found at {SYSTEM_PROMPT_PATH}")
 
     yield
 
@@ -217,8 +232,9 @@ async def chat_completions(request: ChatCompletionRequest):
     messages = [msg.model_dump(exclude_none=True) for msg in request.messages]
 
     # Inject system prompt if not present
-    if system_prompt and not any(m["role"] == "system" for m in messages):
-        messages.insert(0, {"role": "system", "content": system_prompt})
+    prompt = get_system_prompt()
+    if prompt and not any(m["role"] == "system" for m in messages):
+        messages.insert(0, {"role": "system", "content": prompt})
 
     # Streaming: simple pass-through, no tool loop
     if request.stream:
