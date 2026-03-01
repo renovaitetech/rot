@@ -5,8 +5,8 @@ services:
             dockerfile: Dockerfile
         container_name: proxy-server-rot
         environment:
-            - UPSTREAM_API_KEY=${UPSTREAM_API_KEY}
-            - UPSTREAM_API_URL=${UPSTREAM_API_URL}
+            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
             - REDIS_URL=redis://redis:6379
         ports:
             - "8000:8000"
