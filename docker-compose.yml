@@ -1,0 +1,28 @@
+services:
+    proxy-service:
+        build:
+            context: ./proxy-service
+            dockerfile: Dockerfile
+        container_name: proxy-server-rot
+        environment:
+            - UPSTREAM_API_KEY=${UPSTREAM_API_KEY}
+            - UPSTREAM_API_URL=${UPSTREAM_API_URL}
+            - REDIS_URL=redis://redis:6379
+        ports:
+            - "8000:8000"
+        networks:
+            - app-network-rot
+        depends_on:
+            - redis
+        restart: unless-stopped
+
+    redis:
+        image: redis:7-alpine
+        container_name: redis-rot
+        networks:
+            - app-network-rot
+        restart: unless-stopped
+
+networks:
+    app-network-rot:
+        driver: bridge
