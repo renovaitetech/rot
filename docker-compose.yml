@@ -1,4 +1,18 @@
 services:
+    open-webui:
+        image: ghcr.io/open-webui/open-webui:main
+        container_name: open-webui-rot
+        ports:
+            - "3000:8080"
+        environment:
+            - OPENAI_API_BASE_URL=http://proxy-service:8000/v1
+            - OPENAI_API_KEY=dummy_key
+        networks:
+            - app-network-rot
+        depends_on:
+            - proxy-service
+        restart: unless-stopped
+
     proxy-service:
         build:
             context: ./proxy-service

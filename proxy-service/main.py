@@ -295,19 +295,27 @@ async def chat_completions(request: ChatCompletionRequest):
     }
 
 
+MODELS = [
+    {
+        "id": "deepseek-chat",
+        "object": "model",
+        "created": 1677610602,
+        "owned_by": "deepseek",
+    }
+]
+
+
 @app.get("/v1/models")
 async def list_models():
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": "deepseek-chat",
-                "object": "model",
-                "created": 1677610602,
-                "owned_by": "deepseek",
-            }
-        ],
-    }
+    return {"object": "list", "data": MODELS}
+
+
+@app.get("/v1/models/{model_id}")
+async def get_model(model_id: str):
+    for model in MODELS:
+        if model["id"] == model_id:
+            return model
+    raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
 
 
 if __name__ == "__main__":
