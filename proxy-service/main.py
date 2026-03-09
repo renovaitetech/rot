@@ -73,6 +73,31 @@ app.add_middleware(
 )
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+async def response_to_sse(response: Dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Convert a complete chat completion response to SSE stream."""
+    choice = response.get("choices", [{}])[0]
+    content = choice.get("message", {}).get("content", "")
+    resp_id = response.get("id", "chatcmpl-0")
+    model = response.get("model", "deepseek-chat")
+    created = response.get("created", 0)
+
+    base = {"id": resp_id, "object": "chat.completion.chunk", "created": created, "model": model}
+
+    # Role chunk
+    chunk = {**base, "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]}
+    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
+
+    # Content in one chunk
+    if content:
+        chunk = {**base, "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]}
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
+
+    # Stop chunk
+    chunk = {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
+    yield b"data: [DONE]\n\n"
 MAX_TOOL_ITERATIONS = 3
 
 
@@ -231,21 +256,25 @@ async def chat_completions(request: ChatCompletionRequest):
 
     messages = [msg.model_dump(exclude_none=True) for msg in request.messages]
 
-    # Inject system prompt if not present
+    # Inject system prompt: replace existing or insert new
     prompt = get_system_prompt()
-    if prompt and not any(m["role"] == "system" for m in messages):
-        messages.insert(0, {"role": "system", "content": prompt})
+    if prompt:
+        system_idx = next((i for i, m in enumerate(messages) if m["role"] == "system"), None)
+        if system_idx is not None:
+            logger.info(f"Replacing existing system prompt: {messages[system_idx].get('content','')[:200]}")
+            messages[system_idx]["content"] = prompt
+        else:
+            messages.insert(0, {"role": "system", "content": prompt})
+        logger.info(f"Final system prompt: {prompt[:200]}")
 
-    # Streaming: simple pass-through, no tool loop
-    if request.stream:
-        return StreamingResponse(
-            stream_deepseek(messages, request.model, request.temperature, request.max_tokens),
-            media_type="text/event-stream",
-        )
-
-    # Non-streaming without tools: single call
+    # No tools: simple call or stream
     active_tools = TOOLS if TOOLS else None
     if not active_tools:
+        if request.stream:
+            return StreamingResponse(
+                stream_deepseek(messages, request.model, request.temperature, request.max_tokens),
+                media_type="text/event-stream",
+            )
         return await call_deepseek(
             messages=messages,
             model=request.model,
@@ -253,26 +282,17 @@ async def chat_completions(request: ChatCompletionRequest):
             max_tokens=request.max_tokens,
         )
 
-    # Non-streaming with tools: tool-calling loop
-    for iteration in range(1, MAX_TOOL_ITERATIONS + 2):
-        use_tools = active_tools if iteration <= MAX_TOOL_ITERATIONS else None
-
-        call_messages = messages
-        if use_tools is None:
-            call_messages = list(messages)
-            call_messages.append({
-                "role": "user",
-                "content": "На основе всех данных, которые ты уже нашёл, дай итоговый ответ. Не нужно искать дополнительную информацию.",
-            })
-
-        logger.info(f"Iteration {iteration}: tools={'on' if use_tools else 'off'}")
+    # With tools: execute tool-calling loop (always non-streaming)
+    tools_were_called = False
+    for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
+        logger.info(f"Iteration {iteration}: tools=on")
 
         response = await call_deepseek(
-            messages=call_messages,
+            messages=messages,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
-            tools=use_tools,
+            tools=active_tools,
         )
 
         choice = response.get("choices", [{}])[0]
@@ -280,10 +300,13 @@ async def chat_completions(request: ChatCompletionRequest):
         finish_reason = choice.get("finish_reason")
         tool_calls = assistant_message.get("tool_calls")
 
+        logger.info(f"Iteration {iteration} response: finish_reason={finish_reason}, tool_calls={bool(tool_calls)}, content={str(assistant_message.get('content',''))[:300]}")
+
         if not tool_calls or finish_reason == "stop":
-            return response
+            break
 
         # Execute tool calls and append results to history
+        tools_were_called = True
         messages.append(assistant_message)
         for tool_call in tool_calls:
             tool_id = tool_call.get("id")
@@ -296,19 +319,32 @@ async def chat_completions(request: ChatCompletionRequest):
 
             logger.info(f"Executing tool: {function_name}({function_args})")
             tool_result = await execute_tool(function_name, function_args)
+            logger.info(f"Tool result for {function_name}: {json.dumps(tool_result, ensure_ascii=False)[:500]}")
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_id,
                 "content": json.dumps(tool_result, ensure_ascii=False),
             })
 
-    logger.warning(f"Reached max tool iterations ({MAX_TOOL_ITERATIONS})")
-    return {
-        "choices": [{
-            "message": {"role": "assistant", "content": "Превышено максимальное количество итераций."},
-            "finish_reason": "length",
-        }]
-    }
+    # Generate final response (with tool results in context)
+    if tools_were_called:
+        logger.info("Generating final response after tool execution")
+        if request.stream:
+            return StreamingResponse(
+                stream_deepseek(messages, request.model, request.temperature, request.max_tokens),
+                media_type="text/event-stream",
+            )
+        return await call_deepseek(
+            messages=messages,
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+        )
+
+    # No tools were called — return the already-received response
+    if request.stream:
+        return StreamingResponse(response_to_sse(response), media_type="text/event-stream")
+    return response
 
 
 MODELS = [

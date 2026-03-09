@@ -21,6 +21,7 @@ services:
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
             - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+            - MCP_SERVER_URL=http://mcp-server:8001
             - REDIS_URL=redis://redis:6379
         ports:
             - "8000:8000"
@@ -28,6 +29,18 @@ services:
             - app-network-rot
         depends_on:
             - redis
+            - mcp-server
+        restart: unless-stopped
+
+    mcp-server:
+        build:
+            context: ./mcp-server
+            dockerfile: Dockerfile
+        container_name: mcp-server-rot
+        ports:
+            - "8001:8001"
+        networks:
+            - app-network-rot
         restart: unless-stopped
 
     redis:
