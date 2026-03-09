@@ -29,13 +29,16 @@ async def health():
 
 
 @app.post("/documents/upload")
-async def upload_document(file: UploadFile = File(...)):
-    """Upload a document to raw/ prefix."""
+async def upload_document(
+    file: UploadFile = File(...),
+    prefix: str = Query("raw", description="Storage prefix: 'raw' or 'markdown'"),
+):
+    """Upload a document to the specified prefix."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
     data = await file.read()
-    key = f"raw/{file.filename}"
+    key = f"{prefix}/{file.filename}"
     content_type = file.content_type or "application/octet-stream"
     await upload_file(key, data, content_type)
 
