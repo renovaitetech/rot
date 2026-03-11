@@ -112,6 +112,25 @@ services:
             - storage-service
         restart: unless-stopped
 
+    embedding-service:
+        build:
+            context: ./embedding-service
+            dockerfile: Dockerfile
+        container_name: embedding-service-rot
+        environment:
+            - JINA_EMBEDDING_API_KEY=${JINA_EMBEDDING_API_KEY}
+            - JINA_EMBEDDING_BASE_URL=${JINA_EMBEDDING_BASE_URL}
+            - JINA_EMBEDDING_MODEL=${JINA_EMBEDDING_MODEL}
+            - EMBEDDING_DIMENSIONS=2048
+            - REDIS_URL=redis://redis:6379
+        ports:
+            - "8005:8005"
+        networks:
+            - app-network-rot
+        depends_on:
+            - redis
+        restart: unless-stopped
+
     redis:
         image: redis:7-alpine
         container_name: redis-rot
