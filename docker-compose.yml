@@ -92,6 +92,26 @@ services:
             - storage-service
         restart: unless-stopped
 
+    chunking-service:
+        build:
+            context: ./chunking-service
+            dockerfile: Dockerfile
+        container_name: chunking-service-rot
+        environment:
+            - STORAGE_SERVICE_URL=http://storage-service:8002
+            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - DEEPSEEK_API_URL=https://api.deepseek.com
+            - DEEPSEEK_MODEL=deepseek-chat
+            - CHUNK_SIZE=512
+            - DEFAULT_STRATEGY=agentic
+        ports:
+            - "8004:8004"
+        networks:
+            - app-network-rot
+        depends_on:
+            - storage-service
+        restart: unless-stopped
+
     redis:
         image: redis:7-alpine
         container_name: redis-rot
