@@ -11,13 +11,13 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_documents",
-            "description": "Поиск тендерной документации по запросу. Возвращает список тендеров с названием, статусом, дедлайном и бюджетом.",
+            "description": "Семантический поиск по проектной документации. Находит релевантные фрагменты документов по смысловому запросу. Используй этот инструмент когда пользователь спрашивает о содержании документов, технических требованиях, спецификациях или любой информации из проектной документации.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Поисковый запрос, например 'кровля', 'коммуникации', 'open'",
+                        "description": "Поисковый запрос на любом языке, описывающий что нужно найти в документации",
                     },
                     "limit": {
                         "type": "integer",
@@ -29,28 +29,10 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_project_info",
-            "description": "Получить информацию о проекте реновации по названию или адресу. Возвращает стадию, подрядчика, сроки и бюджет.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {
-                        "type": "string",
-                        "description": "Название проекта или адрес, например 'Ленина 42', 'Мира 17'",
-                    },
-                },
-                "required": ["project_name"],
-            },
-        },
-    },
 ]
 
 TOOL_ROUTES: dict[str, str] = {
     "search_documents": "/tools/search_documents",
-    "get_project_info": "/tools/get_project_info",
 }
 
 
@@ -64,7 +46,7 @@ async def execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     logger.info(f"Executing tool '{name}' -> {url}")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=args)
             resp.raise_for_status()
             return resp.json()

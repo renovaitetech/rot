@@ -37,10 +37,16 @@ services:
             context: ./mcp-server
             dockerfile: Dockerfile
         container_name: mcp-server-rot
+        environment:
+            - EMBEDDING_SERVICE_URL=http://embedding-service:8005
+            - QDRANT_SERVICE_URL=http://qdrant-service:8006
         ports:
             - "8001:8001"
         networks:
             - app-network-rot
+        depends_on:
+            - embedding-service
+            - qdrant-service
         restart: unless-stopped
 
     minio:
