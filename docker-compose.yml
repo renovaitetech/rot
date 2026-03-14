@@ -131,6 +131,36 @@ services:
             - redis
         restart: unless-stopped
 
+    qdrant:
+        image: qdrant/qdrant:v1.13.6
+        container_name: qdrant-rot
+        ports:
+            - "6333:6333"
+            - "6334:6334"
+        volumes:
+            - qdrant-data:/qdrant/storage
+        networks:
+            - app-network-rot
+        restart: unless-stopped
+
+    qdrant-service:
+        build:
+            context: ./qdrant-service
+            dockerfile: Dockerfile
+        container_name: qdrant-service-rot
+        environment:
+            - QDRANT_HOST=qdrant
+            - QDRANT_PORT=6333
+            - COLLECTION_NAME=documents
+            - EMBEDDING_DIMENSIONS=2048
+        ports:
+            - "8006:8006"
+        networks:
+            - app-network-rot
+        depends_on:
+            - qdrant
+        restart: unless-stopped
+
     redis:
         image: redis:7-alpine
         container_name: redis-rot
@@ -140,6 +170,7 @@ services:
 
 volumes:
     minio-data:
+    qdrant-data:
 
 networks:
     app-network-rot:
