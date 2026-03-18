@@ -167,6 +167,37 @@ services:
             - qdrant
         restart: unless-stopped
 
+    elasticsearch:
+        image: elasticsearch:8.17.5
+        container_name: elasticsearch-rot
+        environment:
+            - discovery.type=single-node
+            - xpack.security.enabled=false
+            - ES_JAVA_OPTS=-Xms512m -Xmx1g
+        ports:
+            - "9200:9200"
+        volumes:
+            - es-data:/usr/share/elasticsearch/data
+        networks:
+            - app-network-rot
+        restart: unless-stopped
+
+    search-service:
+        build:
+            context: ./search-service
+            dockerfile: Dockerfile
+        container_name: search-service-rot
+        environment:
+            - ELASTICSEARCH_URL=http://elasticsearch:9200
+            - INDEX_NAME=documents
+        ports:
+            - "8007:8007"
+        networks:
+            - app-network-rot
+        depends_on:
+            - elasticsearch
+        restart: unless-stopped
+
     redis:
         image: redis:7-alpine
         container_name: redis-rot
@@ -177,6 +208,7 @@ services:
 volumes:
     minio-data:
     qdrant-data:
+    es-data:
 
 networks:
     app-network-rot:
