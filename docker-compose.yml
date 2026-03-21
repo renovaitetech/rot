@@ -98,6 +98,23 @@ services:
             - storage-service
         restart: unless-stopped
 
+    classifier-service:
+        build:
+            context: ./classifier-service
+            dockerfile: Dockerfile
+        container_name: classifier-service-rot
+        environment:
+            - STORAGE_SERVICE_URL=http://storage-service:8002
+            - OLLAMA_URL=${OLLAMA_URL}
+            - OLLAMA_MODEL=${OLLAMA_MODEL}
+        ports:
+            - "8008:8008"
+        networks:
+            - app-network-rot
+        depends_on:
+            - storage-service
+        restart: unless-stopped
+
     chunking-service:
         build:
             context: ./chunking-service
