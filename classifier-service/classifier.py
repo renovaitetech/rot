@@ -20,7 +20,7 @@ Return a JSON object with these fields:
 - visual_cues: array of 3-5 visual features that led to your classification
   (e.g. "title block stamp", "dense paragraph text", "slide layout with logo", "dimension lines")
 - title: document title if visible on this page
-- description_ru: 1-2 sentences in Russian describing what this document appears to be
+- description: 1-2 sentences in Swedish describing what this document appears to be
 
 Return ONLY valid JSON, no markdown formatting, no code blocks."""
 

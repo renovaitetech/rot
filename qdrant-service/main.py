@@ -40,7 +40,7 @@ class DocumentPayload(BaseModel):
     filename: str = ""
     document_type: str = "unknown"
     title: str | None = None
-    description_ru: str | None = None
+    description: str | None = None
     screenshot_key: str | None = None
     thumbnails: list[str] = []
     pages: int = 0

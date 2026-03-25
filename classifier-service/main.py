@@ -38,6 +38,7 @@ app = FastAPI(title="Classifier Service", version="1.0.0", lifespan=lifespan)
 
 class ClassifyRequest(BaseModel):
     document_key: str  # e.g. "raw/document.pdf"
+    project_id: str = ""
 
 
 class ClassifyResponse(BaseModel):
@@ -46,7 +47,7 @@ class ClassifyResponse(BaseModel):
     confidence: str
     visual_cues: list[str] = []
     title: str | None = None
-    description_ru: str | None = None
+    description: str | None = None
     screenshot_key: str
     thumbnails: list[str] = []
     pages: int = 0
@@ -80,10 +81,11 @@ async def register_document(
     result: dict,
     screenshot_key: str,
     thumbnail_keys: list[str],
+    project_id: str = "",
 ) -> str | None:
     """Register document in Qdrant catalog with embedding of title + description."""
     title = result.get("title", "") or ""
-    description = result.get("description_ru", "") or ""
+    description = result.get("description", "") or ""
     embed_text = f"{title} {description}".strip()
     if not embed_text:
         logger.warning("No title/description for embedding, skipping catalog registration")
@@ -99,13 +101,13 @@ async def register_document(
         "filename": filename,
         "document_type": result.get("document_type", "unknown"),
         "title": title,
-        "description_ru": description,
+        "description": description,
         "screenshot_key": screenshot_key,
         "thumbnails": thumbnail_keys,
         "pages": len(thumbnail_keys),
         "status": "classified",
         "source_key": document_key,
-        "project_id": "",
+        "project_id": project_id,
     }
     resp = await qdrant_client.post(
         "/documents",
@@ -175,6 +177,7 @@ async def classify_document(req: ClassifyRequest):
             result=result,
             screenshot_key=screenshot_key,
             thumbnail_keys=thumbnail_keys,
+            project_id=req.project_id,
         )
     except Exception as e:
         logger.error(f"Failed to register document in catalog: {e}")
@@ -191,7 +194,7 @@ async def classify_document(req: ClassifyRequest):
         confidence=result.get("confidence", "low"),
         visual_cues=result.get("visual_cues", []),
         title=result.get("title"),
-        description_ru=result.get("description_ru"),
+        description=result.get("description"),
         screenshot_key=screenshot_key,
         thumbnails=thumbnail_keys,
         pages=len(thumbnail_keys),
