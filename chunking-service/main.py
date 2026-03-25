@@ -36,6 +36,7 @@ class ChunkItem(BaseModel):
     index: int
     source: str
     section_title: str
+    page: int = 0
 
 
 class ChunkResponse(BaseModel):
@@ -89,6 +90,7 @@ async def chunk_document(req: ChunkRequest):
             index=r.index,
             source=r.source,
             section_title=r.section_title,
+            page=r.page,
         )
         for r in results
     ]

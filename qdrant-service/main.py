@@ -89,6 +89,7 @@ class ChunkPayload(BaseModel):
     index: int
     source: str
     section_title: str
+    page: int = 0
     document_id: str = ""
     doc_type: str = "FU"
     project_id: str = ""

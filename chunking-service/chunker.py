@@ -8,33 +8,33 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-AGENTIC_PROMPT = """Ты — система для разбиения документов на чанки для RAG (Retrieval Augmented Generation).
+AGENTIC_PROMPT = """You are a document chunking system for RAG (Retrieval Augmented Generation).
 
-Документ представлен с пронумерованными строками в формате [N] текст.
+The document is presented with numbered lines in the format [N] text.
 
-Задача: определи границы семантически целостных чанков. Каждый чанк должен содержать одну логическую единицу информации, чтобы при поиске по эмбеддингам результат был точным и релевантным.
+Task: determine the boundaries of semantically coherent chunks. Each chunk should contain one logical unit of information so that embedding-based search returns precise and relevant results.
 
-ПРАВИЛА:
-- Каждый чанк — до {max_tokens} токенов (1 токен ≈ 4 символа для латиницы, ≈ 2 символа для кириллицы)
-- Лучше сделать чанк меньше, но семантически чистым, чем большой но с разнородной информацией
-- Разбивай по логическим секциям документа: если секция маленькая — это один чанк целиком
-- Если секция большая — разбей на подтемы (например бюджет отдельных статей, требования по отдельным системам)
-- НЕ разрывай таблицы, списки и связанные пункты
-- Каждый чанк должен быть понятен без контекста остальных чанков
-- Чанки должны покрывать весь документ без пропусков: end_line одного чанка + 1 = start_line следующего
-- Комментарии вида <!-- Page N --> обозначают начало страницы N оригинального PDF. Используй их для ориентации, но не разбивай чанк только из-за смены страницы — приоритет у семантической целостности
+RULES:
+- Each chunk — up to {max_tokens} tokens (1 token ≈ 4 characters for Latin script)
+- Prefer smaller but semantically clean chunks over large ones with mixed information
+- Split by logical sections: if a section is small — keep it as one chunk
+- If a section is large — split into subtopics (e.g. budget items, requirements per system)
+- Do NOT break tables, lists, or related items
+- Each chunk should be understandable without context from other chunks
+- Chunks must cover the entire document without gaps: end_line of one chunk + 1 = start_line of the next
+- Comments like <!-- Page N --> mark the start of page N from the original PDF. Use them for orientation, but do not split a chunk just because of a page change — semantic integrity takes priority
 
-ФОРМАТ ОТВЕТА — строго JSON:
+RESPONSE FORMAT — strictly JSON:
 {{
   "chunks": [
-    {{"title": "краткое название чанка", "start_line": 1, "end_line": 15}},
+    {{"title": "kort titel på svenska", "start_line": 1, "end_line": 15}},
     {{"title": "...", "start_line": 16, "end_line": 41}}
   ]
 }}
 
-Верни ТОЛЬКО JSON с номерами строк, НЕ включай текст документа в ответ.
+Return ONLY JSON with line numbers, do NOT include document text in your response.
 
-ДОКУМЕНТ:
+DOCUMENT:
 {document}"""
 
 
@@ -46,6 +46,7 @@ class ChunkResult:
     index: int
     source: str
     section_title: str
+    page: int = 0
 
 
 def _clean_text(text: str) -> str:
@@ -64,6 +65,31 @@ def _clean_text(text: str) -> str:
     # Collapse multiple newlines
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
+
+
+_PAGE_RE = re.compile(r'<!--\s*Page\s+(\d+)\s*-->')
+
+
+def _build_page_map(lines: list[str]) -> list[int]:
+    """Build a per-line page number map from <!-- Page N --> comments.
+
+    Returns a list where page_map[i] is the page number for line i.
+    Lines before the first page marker get page 1.
+    """
+    page_map = []
+    current_page = 1
+    for line in lines:
+        m = _PAGE_RE.search(line)
+        if m:
+            current_page = int(m.group(1))
+        page_map.append(current_page)
+    return page_map
+
+
+def _extract_page(text: str) -> int:
+    """Extract the first page number from <!-- Page N --> comments in chunk text."""
+    match = _PAGE_RE.search(text)
+    return int(match.group(1)) if match else 0
 
 
 def _extract_section_title(text: str) -> str:
@@ -113,6 +139,7 @@ def chunk_agentic(text: str, source: str) -> list[ChunkResult]:
 
     numbered_text, lines = _number_lines(text)
     total_lines = len(lines)
+    page_map = _build_page_map(lines)
 
     prompt = AGENTIC_PROMPT.format(
         max_tokens=settings.chunk_size,
@@ -160,6 +187,7 @@ def chunk_agentic(text: str, source: str) -> list[ChunkResult]:
             index=i,
             source=source,
             section_title=chunk.get("title", _extract_section_title(chunk_text)),
+            page=page_map[start],
         ))
 
     logger.info(f"Agentic chunking: {len(results)} chunks from {total_lines} lines")
