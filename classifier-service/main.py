@@ -7,7 +7,7 @@ import unicodedata
 from pathlib import PurePosixPath
 
 from config import settings
-from renderer import render_first_page
+from renderer import render_first_page, generate_thumbnails
 from classifier import classify_image
 
 logging.basicConfig(level=logging.INFO)
@@ -42,6 +42,8 @@ class ClassifyResponse(BaseModel):
     title: str | None = None
     description_ru: str | None = None
     screenshot_key: str
+    thumbnails: list[str] = []
+    pages: int = 0
     duration_ms: int = 0
 
 
@@ -100,9 +102,24 @@ async def classify_document(req: ClassifyRequest):
     filename = PurePosixPath(req.document_key).stem
     screenshot_key = await upload_screenshot(filename, png_bytes)
 
+    # Generate and upload thumbnails
+    logger.info(f"Generating thumbnails for {req.document_key}")
+    thumb_images = generate_thumbnails(pdf_bytes)
+    thumbnail_keys = []
+    for i, thumb_bytes in enumerate(thumb_images):
+        thumb_filename = f"{filename}_page_{i + 1}.png"
+        resp = await storage_client.post(
+            "/documents/upload",
+            params={"prefix": f"thumbnails/{filename}"},
+            files={"file": (thumb_filename, thumb_bytes, "image/png")},
+        )
+        resp.raise_for_status()
+        thumbnail_keys.append(f"thumbnails/{filename}/{thumb_filename}")
+
     logger.info(
         f"Classified {req.document_key}: "
-        f"type={result.get('document_type')}, confidence={result.get('confidence')}"
+        f"type={result.get('document_type')}, confidence={result.get('confidence')}, "
+        f"{len(thumbnail_keys)} thumbnails"
     )
 
     return ClassifyResponse(
@@ -113,6 +130,8 @@ async def classify_document(req: ClassifyRequest):
         title=result.get("title"),
         description_ru=result.get("description_ru"),
         screenshot_key=screenshot_key,
+        thumbnails=thumbnail_keys,
+        pages=len(thumbnail_keys),
         duration_ms=result.get("duration_ms", 0),
     )
 

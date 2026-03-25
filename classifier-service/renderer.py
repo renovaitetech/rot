@@ -17,3 +17,17 @@ def render_first_page(pdf_bytes: bytes, target_long_side: int = 2048) -> bytes:
     logger.info(f"Rendered first page: {pix.width}x{pix.height}px ({len(png_bytes) // 1024}KB)")
     doc.close()
     return png_bytes
+
+
+def generate_thumbnails(pdf_bytes: bytes, width: int = 300) -> list[bytes]:
+    """Render each page of a PDF as a PNG thumbnail."""
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    thumbnails = []
+    for page in doc:
+        zoom = width / page.rect.width
+        mat = pymupdf.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        thumbnails.append(pix.tobytes("png"))
+    logger.info(f"Generated {len(thumbnails)} thumbnails ({width}px width)")
+    doc.close()
+    return thumbnails
