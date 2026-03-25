@@ -15,16 +15,22 @@ logger = logging.getLogger(__name__)
 
 storage_client: httpx.AsyncClient = None
 vision_client: httpx.AsyncClient = None
+qdrant_client: httpx.AsyncClient = None
+embedding_client: httpx.AsyncClient = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global storage_client, vision_client
+    global storage_client, vision_client, qdrant_client, embedding_client
     storage_client = httpx.AsyncClient(base_url=settings.storage_service_url, timeout=120.0)
     vision_client = httpx.AsyncClient(timeout=300.0)
+    qdrant_client = httpx.AsyncClient(base_url=settings.qdrant_service_url, timeout=30.0)
+    embedding_client = httpx.AsyncClient(base_url=settings.embedding_service_url, timeout=60.0)
     yield
     await storage_client.aclose()
     await vision_client.aclose()
+    await qdrant_client.aclose()
+    await embedding_client.aclose()
 
 
 app = FastAPI(title="Classifier Service", version="1.0.0", lifespan=lifespan)
@@ -45,6 +51,7 @@ class ClassifyResponse(BaseModel):
     thumbnails: list[str] = []
     pages: int = 0
     duration_ms: int = 0
+    document_id: str | None = None
 
 
 @app.get("/")
@@ -65,6 +72,49 @@ async def download_pdf(key: str) -> bytes:
         if resp.status_code == 200:
             return resp.content
     raise HTTPException(status_code=404, detail=f"Document not found: {key}")
+
+
+async def register_document(
+    document_key: str,
+    filename: str,
+    result: dict,
+    screenshot_key: str,
+    thumbnail_keys: list[str],
+) -> str | None:
+    """Register document in Qdrant catalog with embedding of title + description."""
+    title = result.get("title", "") or ""
+    description = result.get("description_ru", "") or ""
+    embed_text = f"{title} {description}".strip()
+    if not embed_text:
+        logger.warning("No title/description for embedding, skipping catalog registration")
+        return None
+
+    # Get embedding
+    embed_resp = await embedding_client.post("/embed", json={"text": embed_text})
+    embed_resp.raise_for_status()
+    embedding = embed_resp.json()["embedding"]
+
+    # Register in catalog
+    payload = {
+        "filename": filename,
+        "document_type": result.get("document_type", "unknown"),
+        "title": title,
+        "description_ru": description,
+        "screenshot_key": screenshot_key,
+        "thumbnails": thumbnail_keys,
+        "pages": len(thumbnail_keys),
+        "status": "classified",
+        "source_key": document_key,
+        "project_id": "",
+    }
+    resp = await qdrant_client.post(
+        "/documents",
+        json={"embedding": embedding, "payload": payload},
+    )
+    resp.raise_for_status()
+    doc_id = resp.json()["document_id"]
+    logger.info(f"Registered document '{doc_id}' in catalog")
+    return doc_id
 
 
 async def upload_screenshot(filename: str, png_bytes: bytes) -> str:
@@ -116,10 +166,23 @@ async def classify_document(req: ClassifyRequest):
         resp.raise_for_status()
         thumbnail_keys.append(f"thumbnails/{filename}/{thumb_filename}")
 
+    # Register in document catalog
+    document_id = None
+    try:
+        document_id = await register_document(
+            document_key=req.document_key,
+            filename=filename,
+            result=result,
+            screenshot_key=screenshot_key,
+            thumbnail_keys=thumbnail_keys,
+        )
+    except Exception as e:
+        logger.error(f"Failed to register document in catalog: {e}")
+
     logger.info(
         f"Classified {req.document_key}: "
         f"type={result.get('document_type')}, confidence={result.get('confidence')}, "
-        f"{len(thumbnail_keys)} thumbnails"
+        f"{len(thumbnail_keys)} thumbnails, document_id={document_id}"
     )
 
     return ClassifyResponse(
@@ -133,6 +196,7 @@ async def classify_document(req: ClassifyRequest):
         thumbnails=thumbnail_keys,
         pages=len(thumbnail_keys),
         duration_ms=result.get("duration_ms", 0),
+        document_id=document_id,
     )
 
 

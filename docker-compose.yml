@@ -105,6 +105,8 @@ services:
         container_name: classifier-service-rot
         environment:
             - STORAGE_SERVICE_URL=http://storage-service:8002
+            - QDRANT_SERVICE_URL=http://qdrant-service:8006
+            - EMBEDDING_SERVICE_URL=http://embedding-service:8005
             - OLLAMA_URL=${OLLAMA_URL}
             - OLLAMA_MODEL=${OLLAMA_MODEL}
         ports:
@@ -113,6 +115,8 @@ services:
             - app-network-rot
         depends_on:
             - storage-service
+            - qdrant-service
+            - embedding-service
         restart: unless-stopped
 
     chunking-service:
@@ -174,7 +178,8 @@ services:
         environment:
             - QDRANT_HOST=qdrant
             - QDRANT_PORT=6333
-            - COLLECTION_NAME=documents
+            - DOCUMENTS_COLLECTION=documents
+            - CHUNKS_COLLECTION=chunks
             - EMBEDDING_DIMENSIONS=2048
         ports:
             - "8006:8006"

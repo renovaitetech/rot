@@ -79,6 +79,7 @@ async def search_documents(req: SearchDocumentsRequest):
             "source": r["payload"].get("source", ""),
             "section_title": r["payload"].get("section_title", ""),
             "project_id": r["payload"].get("project_id", ""),
+            "document_id": r["payload"].get("document_id", ""),
             "score": r["score"],
         }
         for r in results
