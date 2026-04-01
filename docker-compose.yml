@@ -119,6 +119,26 @@ services:
             - embedding-service
         restart: unless-stopped
 
+    vision-service:
+        build:
+            context: ./vision-service
+            dockerfile: Dockerfile
+        container_name: vision-service-rot
+        environment:
+            - STORAGE_SERVICE_URL=http://storage-service:8002
+            - VISION_PROVIDER=${VISION_PROVIDER:-ollama}
+            - OLLAMA_URL=${OLLAMA_URL}
+            - OLLAMA_MODEL=${OLLAMA_MODEL}
+            - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+            - OPENROUTER_MODEL=${OPENROUTER_MODEL:-qwen/qwen3.5-122b-a10b}
+        ports:
+            - "8009:8009"
+        networks:
+            - app-network-rot
+        depends_on:
+            - storage-service
+        restart: unless-stopped
+
     chunking-service:
         build:
             context: ./chunking-service
