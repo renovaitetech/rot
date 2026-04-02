@@ -34,7 +34,9 @@ class DocumentPayload(BaseModel):
     index: int
     source: str
     section_title: str
-    doc_type: str = "FU"
+    doc_type: str = ""
+    category: str = ""      # drawing, presentation, text_spec, table_spec
+    subtype: str = ""       # apartment_plan, facade, chart, title, etc.
     project_id: str = ""
 
 
@@ -50,6 +52,8 @@ class SearchRequest(BaseModel):
     query: str
     limit: int = 5
     doc_type: str | None = None
+    category: str | None = None
+    subtype: str | None = None
     project_id: str | None = None
 
 
@@ -60,6 +64,8 @@ class SearchResult(BaseModel):
     source: str
     section_title: str
     doc_type: str
+    category: str = ""
+    subtype: str = ""
     project_id: str
 
 
@@ -129,6 +135,8 @@ async def search_endpoint(req: SearchRequest):
             query=req.query,
             limit=req.limit,
             doc_type=req.doc_type,
+            category=req.category,
+            subtype=req.subtype,
             project_id=req.project_id,
         )
     except Exception as e:

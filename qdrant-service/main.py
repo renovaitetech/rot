@@ -9,6 +9,7 @@ from qdrant_repo import (
     init_collections,
     upsert_document,
     get_document,
+    update_document_payload,
     search_documents,
     delete_document,
     upsert_chunks,
@@ -38,16 +39,17 @@ app = FastAPI(title="Qdrant Service", version="2.0.0", lifespan=lifespan)
 
 class DocumentPayload(BaseModel):
     filename: str = ""
-    document_type: str = "unknown"
+    category: str = "unknown"   # drawing, presentation, text_spec, table_spec
     title: str | None = None
     description: str | None = None
     screenshot_key: str | None = None
     thumbnails: list[str] = []
     pages: int = 0
     status: str = "classified"
-    source_key: str = ""       # raw/document.pdf
-    markdown_key: str = ""     # markdown/document.md
+    source_key: str = ""        # raw/document.pdf
+    markdown_key: str = ""      # markdown/document.md
     project_id: str = ""
+    subtypes: list[str] = []    # unique subtypes from vision analysis
 
 
 class UpsertDocumentRequest(BaseModel):
@@ -62,7 +64,7 @@ class UpsertDocumentResponse(BaseModel):
 class SearchDocumentsRequest(BaseModel):
     vector: list[float]
     limit: int = 5
-    document_type: str | None = None
+    category: str | None = None
     project_id: str | None = None
 
 
@@ -91,7 +93,9 @@ class ChunkPayload(BaseModel):
     section_title: str
     page: int = 0
     document_id: str = ""
-    doc_type: str = "FU"
+    doc_type: str = ""
+    category: str = ""      # drawing, presentation, text_spec, table_spec
+    subtype: str = ""       # apartment_plan, facade, chart, title, etc.
     project_id: str = ""
 
 
@@ -217,8 +221,8 @@ async def get_document_endpoint(document_id: str):
 async def search_documents_endpoint(req: SearchDocumentsRequest):
     """Semantic search over document catalog."""
     filters = {}
-    if req.document_type:
-        filters["document_type"] = req.document_type
+    if req.category:
+        filters["category"] = req.category
     if req.project_id:
         filters["project_id"] = req.project_id
 
@@ -236,6 +240,17 @@ async def search_documents_endpoint(req: SearchDocumentsRequest):
         results=[DocumentResult(**r) for r in results],
         count=len(results),
     )
+
+
+@app.patch("/documents/{document_id}")
+async def update_document_endpoint(document_id: str, fields: dict):
+    """Partial update of document payload fields."""
+    try:
+        update_document_payload(document_id, fields)
+    except Exception as e:
+        logger.error(f"Document update failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"updated": True, "document_id": document_id, "fields": list(fields.keys())}
 
 
 @app.delete("/documents/{document_id}")

@@ -104,6 +104,16 @@ def search_documents(
     ]
 
 
+def update_document_payload(doc_id: str, fields: dict) -> None:
+    """Partial update of document payload fields."""
+    client.set_payload(
+        collection_name=settings.documents_collection,
+        payload=fields,
+        points=[doc_id],
+    )
+    logger.info(f"Updated document '{doc_id}' fields: {list(fields.keys())}")
+
+
 def delete_document(doc_id: str) -> None:
     """Delete a document from catalog by ID."""
     client.delete(
@@ -248,7 +258,7 @@ def migrate_to_two_collections() -> dict:
         doc_id = str(uuid.uuid4())
         doc_payload = {
             "source_key": source,
-            "document_type": points[0].payload.get("doc_type", "unknown"),
+            "category": points[0].payload.get("doc_type", "unknown"),
             "project_id": points[0].payload.get("project_id", ""),
             "status": "indexed",
             "pages": 0,

@@ -11,7 +11,7 @@ Determine the document type based on its visual appearance.
 
 Return a JSON object with these fields:
 
-- document_type: one of:
+- category: one of:
   - "drawing" — architectural/engineering drawing, blueprint, floor plan, elevation, detail
   - "text_spec" — text-heavy specification, description, contract, protocol (AF, rambeskrivning, PM, etc.)
   - "presentation" — slide/presentation with graphics, photos, diagrams, colored backgrounds
@@ -64,7 +64,7 @@ async def classify_image(
         parsed = json.loads(clean)
     except json.JSONDecodeError:
         logger.warning(f"Failed to parse model response as JSON: {content}")
-        parsed = {"document_type": "unknown", "confidence": "low", "raw_response": content}
+        parsed = {"category": "unknown", "confidence": "low", "raw_response": content}
 
     parsed["duration_ms"] = duration_ms
     return parsed

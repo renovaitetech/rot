@@ -61,6 +61,8 @@ INDEX_MAPPING = {
                 },
             },
             "doc_type": {"type": "keyword"},
+            "category": {"type": "keyword"},
+            "subtype": {"type": "keyword"},
             "project_id": {"type": "keyword"},
             "token_count": {"type": "integer"},
             "index": {"type": "integer"},
@@ -131,6 +133,8 @@ async def search_documents(
     query: str,
     limit: int = 5,
     doc_type: str | None = None,
+    category: str | None = None,
+    subtype: str | None = None,
     project_id: str | None = None,
 ) -> list[dict]:
     """Full-text search across text fields using multi_match."""
@@ -155,6 +159,10 @@ async def search_documents(
     filters = []
     if doc_type:
         filters.append({"term": {"doc_type": doc_type}})
+    if category:
+        filters.append({"term": {"category": category}})
+    if subtype:
+        filters.append({"term": {"subtype": subtype}})
     if project_id:
         filters.append({"term": {"project_id": project_id}})
 
@@ -178,6 +186,8 @@ async def search_documents(
             "text": hit["_source"].get("text", ""),
             "section_title": hit["_source"].get("section_title", ""),
             "doc_type": hit["_source"].get("doc_type", ""),
+            "category": hit["_source"].get("category", ""),
+            "subtype": hit["_source"].get("subtype", ""),
             "project_id": hit["_source"].get("project_id", ""),
         }
         for hit in result["hits"]["hits"]

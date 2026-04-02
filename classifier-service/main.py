@@ -43,7 +43,7 @@ class ClassifyRequest(BaseModel):
 
 class ClassifyResponse(BaseModel):
     document_key: str
-    document_type: str
+    category: str
     confidence: str
     visual_cues: list[str] = []
     title: str | None = None
@@ -99,7 +99,7 @@ async def register_document(
     # Register in catalog
     payload = {
         "filename": filename,
-        "document_type": result.get("document_type", "unknown"),
+        "category": result.get("category", "unknown"),
         "title": title,
         "description": description,
         "screenshot_key": screenshot_key,
@@ -184,13 +184,13 @@ async def classify_document(req: ClassifyRequest):
 
     logger.info(
         f"Classified {req.document_key}: "
-        f"type={result.get('document_type')}, confidence={result.get('confidence')}, "
+        f"category={result.get('category')}, confidence={result.get('confidence')}, "
         f"{len(thumbnail_keys)} thumbnails, document_id={document_id}"
     )
 
     return ClassifyResponse(
         document_key=req.document_key,
-        document_type=result.get("document_type", "unknown"),
+        category=result.get("category", "unknown"),
         confidence=result.get("confidence", "low"),
         visual_cues=result.get("visual_cues", []),
         title=result.get("title"),
