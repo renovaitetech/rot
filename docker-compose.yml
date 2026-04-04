@@ -234,7 +234,8 @@ services:
         container_name: search-service-rot
         environment:
             - ELASTICSEARCH_URL=http://elasticsearch:9200
-            - INDEX_NAME=documents
+            - DOCUMENTS_INDEX_NAME=documents
+            - CHUNKS_INDEX_NAME=chunks
         ports:
             - "8007:8007"
         networks:
