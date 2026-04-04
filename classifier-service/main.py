@@ -143,12 +143,7 @@ async def classify_document(req: ClassifyRequest):
     png_bytes = render_first_page(pdf_bytes, settings.target_long_side)
 
     # Classify via vision model
-    result = await classify_image(
-        vision_client,
-        png_bytes,
-        settings.ollama_url,
-        settings.ollama_model,
-    )
+    result = await classify_image(vision_client, png_bytes)
 
     # Upload screenshot
     filename = PurePosixPath(req.document_key).stem

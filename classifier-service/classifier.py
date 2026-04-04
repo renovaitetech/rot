@@ -1,8 +1,12 @@
 import base64
 import json
 import logging
+import time
 
 import httpx
+from openai import AsyncOpenAI
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +29,31 @@ Return a JSON object with these fields:
 Return ONLY valid JSON, no markdown formatting, no code blocks."""
 
 
-async def classify_image(
-    client: httpx.AsyncClient,
-    image_bytes: bytes,
-    ollama_url: str,
-    model: str,
-) -> dict:
-    """Send image to Ollama vision model and parse classification result."""
+def _parse_json_response(content: str) -> dict:
+    """Parse JSON from model response, stripping markdown fences if present."""
+    clean = content.strip()
+    if clean.startswith("```"):
+        clean = "\n".join(clean.split("\n")[1:])
+    if clean.endswith("```"):
+        clean = "\n".join(clean.split("\n")[:-1])
+    clean = clean.strip()
+
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        logger.warning(f"Failed to parse model response as JSON: {content[:500]}")
+        return {"category": "unknown", "confidence": "low", "raw_response": content}
+
+
+async def _classify_ollama(client: httpx.AsyncClient, image_bytes: bytes) -> dict:
+    """Send image to Ollama vision model."""
     img_b64 = base64.b64encode(image_bytes).decode()
 
-    logger.info(f"Sending image to {model} ({len(image_bytes) // 1024}KB)")
+    logger.info(f"Ollama request: model={settings.ollama_model}, image={len(image_bytes) // 1024}KB")
     resp = await client.post(
-        f"{ollama_url}/api/chat",
+        f"{settings.ollama_url}/api/chat",
         json={
-            "model": model,
+            "model": settings.ollama_model,
             "stream": False,
             "messages": [
                 {"role": "user", "content": CLASSIFY_PROMPT, "images": [img_b64]},
@@ -51,20 +66,54 @@ async def classify_image(
     result = resp.json()
     content = result["message"]["content"]
     duration_ms = round(result.get("total_duration", 0) / 1e6)
-    logger.info(f"Model response received in {duration_ms}ms")
+    logger.info(f"Ollama response received in {duration_ms}ms")
 
-    # Strip markdown code fences if present
-    clean = content.strip()
-    if clean.startswith("```"):
-        clean = "\n".join(clean.split("\n")[1:])
-    if clean.endswith("```"):
-        clean = "\n".join(clean.split("\n")[:-1])
-
-    try:
-        parsed = json.loads(clean)
-    except json.JSONDecodeError:
-        logger.warning(f"Failed to parse model response as JSON: {content}")
-        parsed = {"category": "unknown", "confidence": "low", "raw_response": content}
-
+    parsed = _parse_json_response(content)
     parsed["duration_ms"] = duration_ms
+    parsed["provider"] = "ollama"
     return parsed
+
+
+async def _classify_openrouter(image_bytes: bytes) -> dict:
+    """Send image to OpenRouter vision model (OpenAI-compatible API)."""
+    img_b64 = base64.b64encode(image_bytes).decode()
+
+    client = AsyncOpenAI(
+        base_url=settings.openrouter_base_url,
+        api_key=settings.openrouter_api_key,
+    )
+
+    logger.info(f"OpenRouter request: model={settings.openrouter_model}, image={len(image_bytes) // 1024}KB")
+    t0 = time.monotonic()
+    response = await client.chat.completions.create(
+        model=settings.openrouter_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": CLASSIFY_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                    },
+                ],
+            },
+        ],
+        temperature=0.0,
+    )
+    duration_ms = round((time.monotonic() - t0) * 1000)
+
+    content = response.choices[0].message.content or ""
+    logger.info(f"OpenRouter response received in {duration_ms}ms (usage: {response.usage})")
+
+    parsed = _parse_json_response(content)
+    parsed["duration_ms"] = duration_ms
+    parsed["provider"] = "openrouter"
+    return parsed
+
+
+async def classify_image(client: httpx.AsyncClient, image_bytes: bytes) -> dict:
+    """Classify image using the configured inference provider."""
+    if settings.inference_provider == "openrouter":
+        return await _classify_openrouter(image_bytes)
+    return await _classify_ollama(client, image_bytes)
