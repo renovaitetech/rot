@@ -107,8 +107,11 @@ services:
             - STORAGE_SERVICE_URL=http://storage-service:8002
             - QDRANT_SERVICE_URL=http://qdrant-service:8006
             - EMBEDDING_SERVICE_URL=http://embedding-service:8005
+            - INFERENCE_PROVIDER=${INFERENCE_PROVIDER:-ollama}
             - OLLAMA_URL=${OLLAMA_URL}
             - OLLAMA_MODEL=${OLLAMA_MODEL}
+            - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+            - OPENROUTER_MODEL=${OPENROUTER_MODEL:-qwen/qwen3.5-9b}
         ports:
             - "8008:8008"
         networks:
