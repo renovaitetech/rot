@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Union, AsyncGenerator
 import httpx
 import json
+import re
 import uvicorn
 import logging
 import asyncio
@@ -98,6 +99,64 @@ async def response_to_sse(response: Dict[str, Any]) -> AsyncGenerator[bytes, Non
     chunk = {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
     yield b"data: [DONE]\n\n"
+# ============================================================================
+# DSML fallback parser
+# DeepSeek sometimes returns tool calls in its native DSML format inside
+# content instead of the structured tool_calls field.
+# ============================================================================
+
+_DSML_BLOCK_RE = re.compile(
+    r"<｜DSML｜function_calls>(.*?)</｜DSML｜function_calls>",
+    re.DOTALL,
+)
+_DSML_INVOKE_RE = re.compile(
+    r'<｜DSML｜invoke name="([^"]+)">(.*?)</｜DSML｜invoke>',
+    re.DOTALL,
+)
+_DSML_PARAM_RE = re.compile(
+    r'<｜DSML｜parameter name="([^"]+)"\s+string="([^"]*)">(.*?)</｜DSML｜parameter>',
+    re.DOTALL,
+)
+
+
+def _parse_dsml_tool_calls(content: str) -> tuple[list[dict], str] | tuple[None, str]:
+    """
+    Parse DeepSeek's native DSML function call format from content.
+    Returns (tool_calls, cleaned_content) or (None, original_content).
+    """
+    block_match = _DSML_BLOCK_RE.search(content)
+    if not block_match:
+        return None, content
+
+    tool_calls = []
+    for i, invoke in enumerate(_DSML_INVOKE_RE.finditer(block_match.group(1))):
+        name = invoke.group(1)
+        args: dict[str, Any] = {}
+        for param in _DSML_PARAM_RE.finditer(invoke.group(2)):
+            pname = param.group(1)
+            is_string = param.group(2).lower() == "true"
+            raw = param.group(3).strip()
+            if is_string:
+                args[pname] = raw
+            else:
+                try:
+                    args[pname] = json.loads(raw)
+                except (ValueError, TypeError):
+                    args[pname] = raw
+
+        tool_calls.append({
+            "id": f"call_dsml_{i}",
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": json.dumps(args, ensure_ascii=False),
+            },
+        })
+
+    cleaned = _DSML_BLOCK_RE.sub("", content).strip()
+    return tool_calls, cleaned
+
+
 MAX_TOOL_ITERATIONS = 3
 
 
@@ -282,8 +341,11 @@ async def chat_completions(request: ChatCompletionRequest):
             max_tokens=request.max_tokens,
         )
 
-    # With tools: execute tool-calling loop (always non-streaming)
+    # With tools: execute tool-calling loop (always non-streaming).
+    # got_final_response: True when the loop broke on a clean answer (no tool calls).
+    # In that case `response` already holds the final answer — no extra DeepSeek call needed.
     tools_were_called = False
+    got_final_response = False
     for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
         logger.info(f"Iteration {iteration}: tools=on")
 
@@ -300,9 +362,26 @@ async def chat_completions(request: ChatCompletionRequest):
         finish_reason = choice.get("finish_reason")
         tool_calls = assistant_message.get("tool_calls")
 
-        logger.info(f"Iteration {iteration} response: finish_reason={finish_reason}, tool_calls={bool(tool_calls)}, content={str(assistant_message.get('content',''))[:300]}")
+        # Fallback: parse DSML format when tool_calls are embedded in content.
+        # DeepSeek sets finish_reason="stop" with DSML, so track the source separately.
+        dsml_tool_calls = False
+        if not tool_calls:
+            content = assistant_message.get("content") or ""
+            logger.info(f"No structured tool_calls. finish_reason={finish_reason!r} content_repr={repr(content[:300])}")
+            parsed, cleaned = _parse_dsml_tool_calls(content)
+            if parsed:
+                logger.info(f"Parsed {len(parsed)} DSML tool call(s) from content")
+                tool_calls = parsed
+                assistant_message = {**assistant_message, "content": cleaned, "tool_calls": tool_calls}
+                dsml_tool_calls = True
 
-        if not tool_calls or finish_reason == "stop":
+        logger.info(f"Iteration {iteration} response: finish_reason={finish_reason}, tool_calls={bool(tool_calls)}, dsml={dsml_tool_calls}, content={str(assistant_message.get('content',''))[:300]}")
+
+        # Break only when there are no tool calls at all.
+        # DeepSeek often sets finish_reason="stop" even when returning tool_calls —
+        # ignore finish_reason and always execute whatever tool_calls we found.
+        if not tool_calls:
+            got_final_response = True
             break
 
         # Execute tool calls and append results to history
@@ -318,7 +397,7 @@ async def chat_completions(request: ChatCompletionRequest):
                 function_args = {}
 
             logger.info(f"Executing tool: {function_name}({function_args})")
-            tool_result = await execute_tool(function_name, function_args)
+            tool_result = await execute_tool(function_name, function_args, http_client)
             logger.info(f"Tool result for {function_name}: {json.dumps(tool_result, ensure_ascii=False)[:500]}")
             messages.append({
                 "role": "tool",
@@ -326,20 +405,36 @@ async def chat_completions(request: ChatCompletionRequest):
                 "content": json.dumps(tool_result, ensure_ascii=False),
             })
 
-    # Generate final response (with tool results in context)
+    # Return final response.
+    # If the loop broke cleanly (got_final_response=True), `response` is already the answer.
+    # Only call DeepSeek again when the loop exhausted all iterations without a final answer.
     if tools_were_called:
-        logger.info("Generating final response after tool execution")
-        if request.stream:
-            return StreamingResponse(
-                stream_deepseek(messages, request.model, request.temperature, request.max_tokens),
-                media_type="text/event-stream",
+        if not got_final_response:
+            logger.info("Generating final response after tool execution (loop exhausted)")
+            # Explicitly instruct the model to summarize and stop calling tools
+            summary_messages = messages + [{
+                "role": "user",
+                "content": "Based on the search results above, please provide your answer now. Do not make any more tool calls.",
+            }]
+            response = await call_deepseek(
+                messages=summary_messages,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
             )
-        return await call_deepseek(
-            messages=messages,
-            model=request.model,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
+
+        # Strip any DSML from the final response content before returning to client.
+        # DeepSeek may emit DSML even without tools when the conversation has tool history.
+        final_content = response.get("choices", [{}])[0].get("message", {}).get("content") or ""
+        _, clean_content = _parse_dsml_tool_calls(final_content)
+        if clean_content != final_content:
+            logger.info("Stripped residual DSML from final response")
+            response["choices"][0]["message"]["content"] = clean_content
+
+        logger.info("Returning final response to client")
+        if request.stream:
+            return StreamingResponse(response_to_sse(response), media_type="text/event-stream")
+        return response
 
     # No tools were called — return the already-received response
     if request.stream:
