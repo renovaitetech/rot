@@ -40,6 +40,7 @@ services:
         environment:
             - EMBEDDING_SERVICE_URL=http://embedding-service:8005
             - QDRANT_SERVICE_URL=http://qdrant-service:8006
+            - SEARCH_SERVICE_URL=http://search-service:8007
         ports:
             - "8001:8001"
         networks:
@@ -47,6 +48,7 @@ services:
         depends_on:
             - embedding-service
             - qdrant-service
+            - search-service
         restart: unless-stopped
 
     minio:
